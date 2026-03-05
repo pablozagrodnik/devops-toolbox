@@ -1,0 +1,77 @@
+# Szablon CD dla Frontend (React/Vite)
+# Obsługuje Build Args, wypychanie do GHCR oraz restart kontenera przez SSH
+
+name: CD - Frontend
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  REGISTRY: ghcr.io
+  APP_PATH: /home/${{ secrets.SSH_USER }}/app/
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Normalize Repository Name
+        run: |
+          echo "REPO_LOWER=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.REPO_LOWER }}:latest
+          # Przekazywanie zmiennych środowiskowych do etapu budowania (Vite)
+          build-args: |
+            VITE_API_URL=${{ secrets.VITE_API_URL }}
+            VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Normalize Repository Name
+        run: |
+          echo "REPO_LOWER=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Refresh Frontend Container via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GH_USER: ${{ github.actor }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          REPO_LOWER: ${{ env.REPO_LOWER }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: GH_USER, GHCR_PAT, REPO_LOWER
+          script: |
+            cd ${{ env.APP_PATH }}
+
+            echo $GHCR_PAT | docker login ghcr.io -u $GH_USER --password-stdin
+
+            # Pobranie obrazu i restart
+            docker compose pull frontend
+            docker compose up -d --no-deps --force-recreate frontend
+
+            docker logout ghcr.io
+            docker image prune -f

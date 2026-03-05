@@ -1,0 +1,26 @@
+services:
+  studio-reports-app:
+    image: ${IMAGE}
+    container_name: app-prod
+
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+    # Wstrzyknięcie Zmiennych Środowiskowych (GitHub Secrets)
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GA_CREDENTIALS_JSON: ${GA_CREDENTIALS_JSON}
+      APP_ALLOWED_EMAILS: ${APP_ALLOWED_EMAILS}
+      
+      SERVER_FORWARD-HEADERS-STRATEGY: NATIVE
+      TZ: Europe/Warsaw
+
+    volumes:
+      - ./appdata:/app/data
+
+networks:
+  app-network:
+    external: true

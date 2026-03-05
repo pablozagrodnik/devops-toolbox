@@ -1,0 +1,79 @@
+name: CD - Build and Deploy to VPS
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  REGISTRY: ghcr.io
+  APP_PATH: /home/${{ secrets.SSH_USER }}/app/
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        run: |
+          REPO_LOWER=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')
+          IMAGE_ID=$REGISTRY/$REPO_LOWER
+          docker build --platform linux/amd64 -t $IMAGE_ID:latest .
+          docker push $IMAGE_ID:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code (Required for SCP)
+        uses: actions/checkout@v4
+
+      - name: Transfer Docker Compose via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.yml"
+          target: ${{ env.APP_PATH }}
+
+      - name: Remote SSH Deployment
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GH_USER: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GA_CREDENTIALS_JSON: ${{ secrets.GA_CREDENTIALS_JSON }}
+          APP_ALLOWED_EMAILS: ${{ secrets.APP_ALLOWED_EMAILS }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: GH_USER, GH_TOKEN, GITHUB_REPOSITORY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GA_CREDENTIALS_JSON, APP_ALLOWED_EMAILS
+          script: |
+            REPO_LOWER=$(echo $GITHUB_REPOSITORY | tr '[:upper:]' '[:lower:]')
+            export IMAGE="ghcr.io/$REPO_LOWER:latest"
+            
+            cd ${{ env.APP_PATH }}
+            
+            echo $GH_TOKEN | docker login ghcr.io -u $GH_USER --password-stdin
+            
+            docker compose pull
+            docker compose up -d --force-recreate
+            
+            docker logout ghcr.io
+            docker image prune -f

@@ -1,0 +1,91 @@
+# Szablon CD: Budowanie obrazu i Deployment na VM (GCP/DigitalOcean)
+# Wykorzystuje GitHub Container Registry (GHCR) oraz Docker Compose.
+
+name: CD - Build and Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  REGISTRY: ghcr.io
+  # Ścieżka zunifikowana
+  APP_PATH: /home/${{ secrets.SSH_USER }}/app/
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Normalize Repository Name
+        # Zmiana nazwy na małe litery
+        run: |
+          echo "REPO_LOWER=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          no-cache: true
+          tags: ${{ env.REGISTRY }}/${{ env.REPO_LOWER }}:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Copy docker-compose via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.yml"
+          target: ${{ env.APP_PATH }}
+
+      - name: Execute Remote Deploy
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GH_USER: ${{ github.actor }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          # Przykładowe zmienne środowiskowe aplikacji
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          REPO_LOWER: ${{ env.REPO_LOWER }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: GH_USER,GHCR_PAT,DB_NAME,DB_USER,DB_HOST,DB_PASSWORD,REPO_LOWER
+          script: |
+            cd ${{ env.APP_PATH }}
+            
+            # Logowanie do rejestru na serwerze
+            echo $GHCR_PAT | docker login ghcr.io -u $GH_USER --password-stdin
+
+            # Pobranie najnowszych obrazów i restart usług
+            docker compose pull
+            docker compose up -d --force-recreate
+
+            # Sprzątanie starych obrazów i wylogowanie
+            docker logout ghcr.io
+            docker image prune -f

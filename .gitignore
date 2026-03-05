@@ -1,0 +1,44 @@
+# Terraform
+.terraform/
+
+# Pliki stanu
+*.tfstate
+*.tfstate.*
+
+# Pliki ze zmiennymi
+*.tfvars
+*.tfvars.json
+
+# Logi i pliki tymczasowe
+crash.log
+*.usage.tfplan
+
+# Docker
+# Logi kontenerów i pliki tymczasowe
+*.log
+.docker/
+
+# Go
+# Binaries and object files
+bin/
+main
+*.exe
+*.test
+*.prof
+
+# Pliki ze zmiennymi środowiskowymi
+.env
+*.env
+.env.local
+
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.project
+.settings/
+.classpath
+
+*.swp
+*~

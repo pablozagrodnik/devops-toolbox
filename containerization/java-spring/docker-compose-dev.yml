@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  # Lokalna baza danych do testów i developmentu
+  postgres:
+    image:postgres:15-alpine
+    container_name: dev-database
+    environment:
+      POSTGRES_DB: devdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: passwd
+    ports:
+      - "5432:5432"
